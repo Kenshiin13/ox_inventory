@@ -164,7 +164,7 @@ lib.callback.register('ox_inventory:craftItem', function(source, id, index, reci
 			table.wipe(tbl)
 
 			for name, needs in pairs(recipe.ingredients) do
-				if needs == 0 then goto continue end
+				if needs == 0 then break end
 
 				local slots = items[name] or items
 
@@ -194,8 +194,6 @@ lib.callback.register('ox_inventory:craftItem', function(source, id, index, reci
 					-- Player does not have enough items (ui should prevent crafting if lacking items, so this shouldn't trigger)
 					if needs > 0 and i == #slots then return end
 				end
-
-				::continue::
 			end
 
 			if not TriggerEventHooks('craftItem', {
