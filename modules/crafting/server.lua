@@ -167,19 +167,19 @@ lib.callback.register('ox_inventory:craftItem', function(source, id, index, reci
 								local percentage = ((durability - os.time()) * 100) / degrade
 
 								if percentage >= needs * 100 then
-									tbl[slot.slot] = needs
+									tbl[slot.slot] = { name = name, count = needs }
 									break
 								end
 							else
-								tbl[slot.slot] = needs
+								tbl[slot.slot] = { name = name, count = needs }
 								break
 							end
 						end
 					elseif needs <= slot.count then
-						tbl[slot.slot] = needs
+						tbl[slot.slot] = { name = name, count = needs }
 						break
 					else
-						tbl[slot.slot] = slot.count
+						tbl[slot.slot] = { name = name, count = slot.count }
 						needs -= slot.count
 					end
 
@@ -205,19 +205,25 @@ lib.callback.register('ox_inventory:craftItem', function(source, id, index, reci
 					if Inventory.GetItemCount(left, name) < needs then return end
 				end
 
-				for slot, count in pairs(tbl) do
+				for slot, info in pairs(tbl) do
 					local invSlot = left.items[slot]
+					local count = info.count
 
-					if not invSlot then return end
+					if not invSlot or invSlot.name ~= info.name then return end
 
 					if count < 1 then
-						local item = Items(invSlot.name)
-						local durability = invSlot.metadata.durability or 100
+						local item = Items(info.name)
+						local durability = invSlot.metadata.durability
+
+						if not durability then return end
 
 						if durability > 100 then
 							local degrade = (invSlot.metadata.degrade or item.degrade) * 60
+							local percentage = ((durability - os.time()) * 100) / degrade
+							if percentage < count * 100 then return end
 							durability -= degrade * count
 						else
+							if durability < count * 100 then return end
 							durability -= count * 100
 						end
 
@@ -245,8 +251,9 @@ lib.callback.register('ox_inventory:craftItem', function(source, id, index, reci
                             Items.UpdateDurability(left, invSlot, item, durability < 0 and 0 or durability)
 						end
 					else
-						local removed = invSlot and Inventory.RemoveItem(left, invSlot.name, count, nil, slot)
-						-- Failed to remove item (inventory state unexpectedly changed?)
+						if invSlot.count < count then return end
+
+						local removed = Inventory.RemoveItem(left, info.name, count, nil, slot)
 						if not removed then return end
 					end
 				end
