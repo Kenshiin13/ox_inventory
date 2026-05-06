@@ -3,6 +3,7 @@ if not lib then return end
 local CraftingBenches = {}
 local Items = require 'modules.items.server'
 local Inventory = require 'modules.inventory.server'
+local Utils = require 'modules.utils.server'
 
 ---@param id number
 ---@param data table
@@ -96,6 +97,25 @@ end)
 
 local TriggerEventHooks = require 'modules.hooks.server'
 
+---@param slot { metadata: table, count: integer }
+---@param item table
+---@param needs number
+---@param ostime integer
+---@return boolean eligible, number? durability, number? degrade
+local function checkFractionEligibility(slot, item, needs, ostime)
+	local durability = slot.metadata.durability
+
+	if not durability then return false end
+
+	if durability > 100 then
+		local degrade = (slot.metadata.degrade or item.degrade) * 60
+		local percentage = ((durability - ostime) * 100) / degrade
+		return percentage >= needs * 100, durability, degrade
+	end
+
+	return durability >= needs * 100, durability
+end
+
 lib.callback.register('ox_inventory:craftItem', function(source, id, index, recipeId, toSlot)
 	local left, bench = Inventory(source), CraftingBenches[id]
 
@@ -158,22 +178,9 @@ lib.callback.register('ox_inventory:craftItem', function(source, id, index, reci
 							break
 						end
 					elseif needs < 1 then
-						local item = Items(name)
-						local durability = slot.metadata.durability
-
-						if durability and durability >= needs * 100 then
-							if durability > 100 then
-								local degrade = (slot.metadata.degrade or item.degrade) * 60
-								local percentage = ((durability - os.time()) * 100) / degrade
-
-								if percentage >= needs * 100 then
-									tbl[slot.slot] = { name = name, count = needs }
-									break
-								end
-							else
-								tbl[slot.slot] = { name = name, count = needs }
-								break
-							end
+						if checkFractionEligibility(slot, Items(name), needs, os.time()) then
+							tbl[slot.slot] = { name = name, count = needs }
+							break
 						end
 					elseif needs <= slot.count then
 						tbl[slot.slot] = { name = name, count = needs }
@@ -201,29 +208,28 @@ lib.callback.register('ox_inventory:craftItem', function(source, id, index, reci
 			local success = lib.callback.await('ox_inventory:startCrafting', source, id, recipeId)
 
 			if success then
-				for name, needs in pairs(recipe.ingredients) do
-					if Inventory.GetItemCount(left, name) < needs then return end
-				end
+				local ostime = os.time()
 
-				for slot, info in pairs(tbl) do
+				for slot, entry in pairs(tbl) do
 					local invSlot = left.items[slot]
-					local count = info.count
+					local count = entry.count
 
-					if not invSlot or invSlot.name ~= info.name then return end
+					if not invSlot then return end
+
+					if invSlot.name ~= entry.name then
+						Utils.LogExploit(source, 'craftItem', ('Ingredient slot %s changed from "%s" to "%s" during craft.'):format(slot, entry.name, invSlot.name))
+						return
+					end
 
 					if count < 1 then
-						local item = Items(info.name)
-						local durability = invSlot.metadata.durability
+						local item = Items(entry.name)
+						local eligible, durability, degrade = checkFractionEligibility(invSlot, item, count, ostime)
 
-						if not durability then return end
+						if not eligible then return end
 
-						if durability > 100 then
-							local degrade = (invSlot.metadata.degrade or item.degrade) * 60
-							local percentage = ((durability - os.time()) * 100) / degrade
-							if percentage < count * 100 then return end
+						if degrade then
 							durability -= degrade * count
 						else
-							if durability < count * 100 then return end
 							durability -= count * 100
 						end
 
@@ -253,7 +259,7 @@ lib.callback.register('ox_inventory:craftItem', function(source, id, index, reci
 					else
 						if invSlot.count < count then return end
 
-						local removed = Inventory.RemoveItem(left, info.name, count, nil, slot)
+						local removed = Inventory.RemoveItem(left, entry.name, count, nil, slot)
 						if not removed then return end
 					end
 				end
